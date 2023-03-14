@@ -111,6 +111,11 @@ class Connection
      */
     private $lastActivityTime = 0;
 
+    /**
+     * @var bool
+     */
+    private $consuming = false;
+
     public function __construct(array $connectionOptions, array $exchangeOptions, array $queuesOptions, AmqpFactory $amqpFactory = null)
     {
         if (!\extension_loaded('amqp')) {
@@ -468,6 +473,12 @@ class Connection
         $result = [];
 
         try {
+            $flags = AMQP_JUST_CONSUME;
+            if (!$this->consuming) {
+                $flags = 0;
+                $this->consuming = true;
+            }
+
             $this->queue($queueName)->consume(function (\AMQPEnvelope $envelope) use (&$result): bool {
                 $result[] = $envelope;
 
@@ -476,7 +487,7 @@ class Connection
                 }
 
                 return true;
-            });
+            }, $flags);
         } catch (\AMQPQueueException $e) {
             if ('Consumer timeout exceed' === $e->getMessage()) {
                 return $result;
