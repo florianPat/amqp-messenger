@@ -116,6 +116,11 @@ class Connection
      */
     private $consuming = false;
 
+    /**
+     * @var array<string>
+     */
+    private $consumingQueues = [];
+
     public function __construct(array $connectionOptions, array $exchangeOptions, array $queuesOptions, AmqpFactory $amqpFactory = null)
     {
         if (!\extension_loaded('amqp')) {
@@ -132,6 +137,26 @@ class Connection
         $this->exchangeOptions = $exchangeOptions;
         $this->queuesOptions = $queuesOptions;
         $this->amqpFactory = $amqpFactory ?? new AmqpFactory();
+    }
+
+    private static function getConsumerTag(string $queueName): string
+    {
+        return \sprintf('hdnet_%s', $queueName);
+    }
+
+    public function __destruct()
+    {
+        foreach ($this->consumingQueues as $consumingQueue) {
+            try {
+                $this->queue($consumingQueue)->cancel(self::getConsumerTag($consumingQueue));
+            } catch (\AMQPChannelException $e) {
+                continue;
+            } catch (\AMQPConnectionException $e) {
+                continue;
+            }
+        }
+
+        $this->consumingQueues = [];
     }
 
     /**
@@ -479,6 +504,10 @@ class Connection
                 $this->consuming = true;
             }
 
+            if (!\in_array($queueName, $this->consumingQueues)) {
+                $this->consumingQueues[] = $queueName;
+            }
+
             $this->queue($queueName)->consume(function (\AMQPEnvelope $envelope) use (&$result): bool {
                 $result[] = $envelope;
 
@@ -487,7 +516,7 @@ class Connection
                 }
 
                 return true;
-            }, $flags);
+            }, $flags, self::getConsumerTag($queueName));
         } catch (\AMQPQueueException $e) {
             if ('Consumer timeout exceed' === $e->getMessage()) {
                 return $result;
