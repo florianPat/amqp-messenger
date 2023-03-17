@@ -112,12 +112,7 @@ class Connection
     private $lastActivityTime = 0;
 
     /**
-     * @var bool
-     */
-    private $consuming = false;
-
-    /**
-     * @var array<string>
+     * @var array
      */
     private $consumingQueues = [];
 
@@ -146,9 +141,14 @@ class Connection
 
     public function __destruct()
     {
-        foreach ($this->consumingQueues as $consumingQueue) {
+        foreach ($this->amqpQueues as $amqpQueue) {
+            if (!isset($this->consumingQueues[$amqpQueue->getName()])) {
+                continue;
+            }
+
+            unset($this->consumingQueues[$amqpQueue->getName()]);
             try {
-                $this->queue($consumingQueue)->cancel(self::getConsumerTag($consumingQueue));
+                $amqpQueue->cancel(self::getConsumerTag($amqpQueue->getName()));
             } catch (\AMQPChannelException $e) {
                 continue;
             } catch (\AMQPConnectionException $e) {
@@ -156,7 +156,17 @@ class Connection
             }
         }
 
-        $this->consumingQueues = [];
+        if (null !== $this->amqpChannel) {
+            if ($this->amqpChannel->isConnected()) {
+                $this->amqpChannel->close();
+
+                if ($this->amqpChannel->getConnection()->isConnected()) {
+                    $this->amqpChannel->getConnection()->disconnect();
+                }
+            }
+        }
+
+        $this->clearWhenDisconnected();
     }
 
     /**
@@ -499,13 +509,9 @@ class Connection
 
         try {
             $flags = AMQP_JUST_CONSUME;
-            if (!$this->consuming) {
+            if (!isset($this->consumingQueues[$queueName])) {
+                $this->consumingQueues[$queueName] = $this->queue($queueName);
                 $flags = 0;
-                $this->consuming = true;
-            }
-
-            if (!\in_array($queueName, $this->consumingQueues)) {
-                $this->consumingQueues[] = $queueName;
             }
 
             $this->queue($queueName)->consume(function (\AMQPEnvelope $envelope) use (&$result): bool {
