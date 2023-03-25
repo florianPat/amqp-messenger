@@ -75,10 +75,16 @@ class AmqpReceiver implements QueueReceiverInterface, MessageCountAwareInterface
                     'headers' => $amqpEnvelope->getHeaders(),
                 ]);
             } catch (MessageDecodingFailedException $exception) {
+                echo \sprintf(
+                    'Message decoding failed: Message: %s, Code: %s, Trace: %s',
+                    $exception->getMessage(),
+                    $exception->getCode(),
+                    $exception->getTraceAsString()
+                );
                 // invalid message of some type
                 $this->rejectAmqpEnvelope($amqpEnvelope, $queueName);
 
-                throw $exception;
+                continue;
             }
 
             yield $envelope->with(new AmqpReceivedStamp($amqpEnvelope, $queueName));
